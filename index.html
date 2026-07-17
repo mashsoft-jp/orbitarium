@@ -1794,7 +1794,10 @@
     document.getElementById("infoCredit").textContent = cr ? T().imgPrefix + cr : T().procTex;
     infoPanel.classList.add("open");
   }
-  document.getElementById("closeInfo").addEventListener("click", () => select(null, false));
+  // ✕ はパネルを閉じるだけで、選択 (カメラ追尾) は維持する
+  document.getElementById("closeInfo").addEventListener("click", () => {
+    infoPanel.classList.remove("open");
+  });
 
   // ナビ (惑星の衛星は展開式。小惑星は区切り線の下)
   const NAV_BODIES = [SUN, ...PLANETS];
@@ -1816,8 +1819,13 @@
     btn.textContent = bName(b);
     btn.dataset.key = b.key;
     btn.addEventListener("click", () => {
-      if (selected === b) select(null, false);   // 再クリックで解除
-      else select(b, true);
+      if (selected === b) {
+        // パネルを閉じていた場合は再表示、開いていれば選択解除
+        if (infoPanel.classList.contains("open")) select(null, false);
+        else openInfo(b);
+      } else {
+        select(b, true);
+      }
     });
     const ob = document.createElement("button");
     ob.className = "tgl on";
