@@ -571,6 +571,12 @@
       colA:[0.58,0.55,0.50], colB:[0.40,0.37,0.33], colC:[0,0,0], rim:[0,0,0], params:[0,0,0,0],
       rows:[["区分","小惑星 (3番)"],["直径","約 247 km"],["平均距離","2.67 au"],["公転周期","4.36 年"],["離心率","0.26"]],
       fact:"1804年発見の3番小惑星。歴史的な「四大小惑星」の一つで、小惑星帯の中でも離心率の大きい楕円軌道を回っています。" },
+    // ---- 周期彗星 (位相は 1986-02-09 の近日点通過で校正) ----
+    { key:"halley", name:"ハレー彗星", en:"HALLEY", a:17.834, e:0.96714, T:27509, i:162.26, node:58.42, peri:169.75, L0:236.15,
+      tilt:0, rot:2.2, rkm:5.5, type:1, comet:true,
+      colA:[0.45,0.50,0.60], colB:[0.20,0.22,0.26], colC:[0,0,0], rim:[0.4,0.5,0.7], params:[0,0,0,0],
+      rows:[["区分","周期彗星 (1P)"],["核の大きさ","約 15×8 km"],["近日点距離","0.59 au"],["遠日点距離","35.1 au"],["公転周期","約 75.3 年"],["軌道傾斜角","162.3° (逆行)"],["前回の近日点","1986年2月"],["次回の近日点","2061年ごろ"]],
+      fact:"約76年ごとに回帰する最も有名な周期彗星。黄道に対してほぼ逆向き (逆行) の細長い楕円軌道を持ち、遠日点は海王星の外側に達します。※ 摂動を無視した固定軌道のため、回帰時期は実際と数ヶ月ずれます。" },
   ];
 
   const SUN = {
@@ -734,6 +740,9 @@
     juno: {
       rows:[["Class","Asteroid (#3)"],["Diameter","~247 km"],["Mean distance","2.67 au"],["Orbital period","4.36 yr"],["Eccentricity","0.26"]],
       fact:"Discovered in 1804, one of the historic 'big four' asteroids, on a notably eccentric orbit." },
+    halley: {
+      rows:[["Class","Periodic comet (1P)"],["Nucleus","~15×8 km"],["Perihelion","0.59 au"],["Aphelion","35.1 au"],["Orbital period","~75.3 yr"],["Inclination","162.3° (retrograde)"],["Last perihelion","Feb 1986"],["Next perihelion","c. 2061"]],
+      fact:"The most famous periodic comet, returning roughly every 76 years on a retrograde, highly elongated orbit that reaches beyond Neptune. Note: with perturbations ignored, return dates drift by a few months." },
     phobos: {
       rows:[["Diameter","~22 km"],["Orbital radius","9,376 km"],["Orbital period","7.66 hours"],["Rotation","synchronous"]],
       fact:"Orbits faster than Mars rotates, so it rises in the west and sets in the east. It is slowly spiraling inward and will eventually crash into Mars." },
@@ -809,7 +818,8 @@
   function keplerAU(p, days, out) {
     const M = ((p.L0 - p.peri) * DEG + 2 * Math.PI * days / p.T) % (2 * Math.PI);
     let E = M;
-    for (let k = 0; k < 7; k++) E -= (E - p.e * Math.sin(E) - M) / (1 - p.e * Math.cos(E));
+    // 反復回数はハレー彗星 (e≈0.97) でも収束する回数に設定
+    for (let k = 0; k < 12; k++) E -= (E - p.e * Math.sin(E) - M) / (1 - p.e * Math.cos(E));
     const xo = p.a * (Math.cos(E) - p.e);
     const yo = p.a * Math.sqrt(1 - p.e * p.e) * Math.sin(E);
     out[0] = p.m[0] * xo + p.m[1] * yo;   // 黄道 X
