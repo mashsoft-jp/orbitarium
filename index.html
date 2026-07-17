@@ -1092,11 +1092,64 @@
     }`;
   const billFS = PRE + `
     varying vec2 vUv;
+    uniform vec3 uCol1, uCol2;
     void main() {
       float d = length(vUv);
       float a = pow(max(1.0 - d, 0.0), 2.4);
-      vec3 c = mix(vec3(1.0, 0.45, 0.1), vec3(1.0, 0.85, 0.5), a);
+      vec3 c = mix(uCol1, uCol2, a);
       gl_FragColor = vec4(c * a * 0.9, 0.0);
+    }`;
+
+  // ---- 彗星の尾 (頭部から軸方向に伸びる帯, 加算) ----
+  const tailVS = `
+    attribute vec2 aCorner;
+    uniform mat4 uVP;
+    uniform vec3 uHead, uAxis, uSide;
+    uniform vec2 uDim;                  // x: 長さ  y: 半幅
+    varying vec2 vUv;
+    void main() {
+      float x = aCorner.x * 0.5 + 0.5;
+      vec3 w = uHead + uAxis * (x * uDim.x)
+             + uSide * (aCorner.y * uDim.y * (0.35 + 0.65 * x));  // 先端ほど広がる
+      vUv = vec2(x, aCorner.y);
+      gl_Position = uVP * vec4(w, 1.0);
+    }`;
+  const tailFS = PRE + `
+    varying vec2 vUv;
+    uniform vec3 uCol;
+    uniform float uAlpha;
+    void main() {
+      // 付け根はフェードインさせ、コマの光と連続につなぐ (段差防止)
+      float a = pow(1.0 - vUv.x, 1.6) * smoothstep(0.0, 0.07, vUv.x)
+              * pow(max(1.0 - abs(vUv.y), 0.0), 1.8) * uAlpha;
+      gl_FragColor = vec4(uCol * a, 0.0);
+    }`;
+
+  // ---- 彗星のコマ (太陽側が圧縮された涙滴型の光。ガウシアン減衰で継ぎ目なし) ----
+  const comaVS = `
+    attribute vec2 aCorner;
+    uniform mat4 uVP;
+    uniform vec3 uHead, uAxis, uSide;
+    uniform vec2 uDim;                  // x: 軸方向スケール  y: 半幅
+    varying vec2 vP;                    // x: 軸方向 (太陽側が負)  y: 横方向
+    void main() {
+      float x = mix(-0.4, 1.2, aCorner.x * 0.5 + 0.5);
+      vP = vec2(x, aCorner.y);
+      vec3 w = uHead + uAxis * (x * uDim.x) + uSide * (aCorner.y * uDim.y);
+      gl_Position = uVP * vec4(w, 1.0);
+    }`;
+  const comaFS = PRE + `
+    varying vec2 vP;
+    uniform vec3 uCol;
+    uniform float uAlpha;
+    void main() {
+      // 太陽側 (x<0) は圧縮、反太陽側はゆるやかに伸びて尾へ連続する
+      float sx = vP.x < 0.0 ? vP.x * 2.8 : vP.x;
+      float d2 = sx * sx + vP.y * vP.y * 1.3;
+      float glow = exp(-d2 * 4.5);
+      float core = exp(-(vP.x * vP.x + vP.y * vP.y) * 30.0);
+      float a = (glow * 0.8 + core * 1.7) * uAlpha;
+      gl_FragColor = vec4(uCol * a, 0.0);
     }`;
 
   // ---- 土星の環 ----
@@ -1127,13 +1180,15 @@
       gl_FragColor = vec4(c * a, a);
     }`;
 
-  let bodyP, lineP, pointP, billP, ringP;
+  let bodyP, lineP, pointP, billP, ringP, tailP, comaP;
   try {
     bodyP = program(bodyVS, bodyFS);
     lineP = program(lineVS, lineFS);
     pointP = program(pointVS, pointFS);
     billP = program(billVS, billFS);
     ringP = program(ringVS, ringFS);
+    tailP = program(tailVS, tailFS);
+    comaP = program(comaVS, comaFS);
   } catch (err) {
     console.error(err);
     document.getElementById("noGL").style.display = "grid";
@@ -1343,6 +1398,7 @@
   // ワールド位置キャッシュ
   const posAU = new Map(), posW = new Map();
   for (const b of [SUN, ...PLANETS, ...SATELLITES]) { posAU.set(b.key, [0,0,0]); posW.set(b.key, [0,0,0]); }
+  const COMETS = PLANETS.filter((p) => p.comet);
 
   function updatePositions() {
     const tmp = [0, 0, 0];
@@ -1394,6 +1450,7 @@
     rx: new Float32Array(16), ry: new Float32Array(16), rot: new Float32Array(16),
     model: new Float32Array(16), mvp: new Float32Array(16),
     t: [0, 0, 0], tgt: [0, 0, 0], negEye: [0, 0, 0],
+    v: [0, 0, 0], v2: [0, 0, 0],
   };
 
   function bodyModel(b, r) {
@@ -1655,10 +1712,79 @@
       gl.uniform3f(billP.u.uRight, Vm[0], Vm[4], Vm[8]);
       gl.uniform3f(billP.u.uUp, Vm[1], Vm[5], Vm[9]);
       gl.uniform1f(billP.u.uSize, bodyR(SUN) * 5.5);
+      gl.uniform3f(billP.u.uCol1, 1.0, 0.45, 0.1);
+      gl.uniform3f(billP.u.uCol2, 1.0, 0.85, 0.5);
       gl.bindBuffer(gl.ARRAY_BUFFER, billVB);
       gl.enableVertexAttribArray(billP.a.aCorner);
       gl.vertexAttribPointer(billP.a.aCorner, 2, gl.FLOAT, false, 0, 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      // --- 彗星の尾・コマ (太陽接近時のみ, 加算) ---
+      for (const c of COMETS) {
+        const pa = posAU.get(c.key);
+        const rau = Math.hypot(pa[0], pa[1], pa[2]);
+        const act = Math.min(1, Math.max(0, (3 - rau) / 2.2));   // 3au 以内で活動
+        if (act < 0.02) continue;
+        const w = posW.get(c.key);
+        // 反太陽方向 (イオンテイルの軸)
+        const wl = Math.hypot(w[0], w[1], w[2]) || 1;
+        const ax = w[0] / wl, ay = w[1] / wl, az = w[2] / wl;
+        // 軌道速度方向 (ダストテイルの湾曲用)
+        keplerAU(c, simDays + 2, SCR.v);
+        toWorld(SCR.v, SCR.v2);
+        let vx = SCR.v2[0] - w[0], vy = SCR.v2[1] - w[1], vz = SCR.v2[2] - w[2];
+        const vl = Math.hypot(vx, vy, vz) || 1;
+        vx /= vl; vy /= vl; vz /= vl;
+        const hx = w[0] - eye[0], hy = w[1] - eye[1], hz = w[2] - eye[2];
+        // 尾の幅方向 = 軸×視線 (カメラに正対する帯)
+        const sideOf = (bx, by, bz) => {
+          let sx = by * hz - bz * hy, sy = bz * hx - bx * hz, sz = bx * hy - by * hx;
+          const sl = Math.hypot(sx, sy, sz);
+          if (sl < 1e-9) { sx = 0; sy = 1; sz = 0; } else { sx /= sl; sy /= sl; sz /= sl; }
+          return [sx, sy, sz];
+        };
+        const L = act * act * 0.55 * K_REAL;                     // 近日点で約 0.55au
+        gl.useProgram(tailP.pr);
+        gl.uniformMatrix4fv(tailP.u.uVP, false, VP);
+        gl.uniform3f(tailP.u.uHead, hx, hy, hz);
+        gl.bindBuffer(gl.ARRAY_BUFFER, billVB);
+        gl.enableVertexAttribArray(tailP.a.aCorner);
+        gl.vertexAttribPointer(tailP.a.aCorner, 2, gl.FLOAT, false, 0, 0);
+        // イオンテイル (青白, 反太陽方向にまっすぐ)
+        let s = sideOf(ax, ay, az);
+        gl.uniform3f(tailP.u.uAxis, ax, ay, az);
+        gl.uniform3f(tailP.u.uSide, s[0], s[1], s[2]);
+        gl.uniform2f(tailP.u.uDim, L, L * 0.08);
+        gl.uniform3f(tailP.u.uCol, 0.45, 0.6, 1.0);
+        gl.uniform1f(tailP.u.uAlpha, 0.6 * act);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        // ダストテイル (黄白, 進行方向の後ろへ湾曲)
+        let dx = ax - vx * 0.35, dy = ay - vy * 0.35, dz = az - vz * 0.35;
+        const dl = Math.hypot(dx, dy, dz) || 1;
+        dx /= dl; dy /= dl; dz /= dl;
+        s = sideOf(dx, dy, dz);
+        gl.uniform3f(tailP.u.uAxis, dx, dy, dz);
+        gl.uniform3f(tailP.u.uSide, s[0], s[1], s[2]);
+        gl.uniform2f(tailP.u.uDim, L * 0.75, L * 0.16);
+        gl.uniform3f(tailP.u.uCol, 1.0, 0.9, 0.7);
+        gl.uniform1f(tailP.u.uAlpha, 0.45 * act);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        // コマ (太陽側が圧縮された涙滴型。反太陽側はそのまま尾に連続する)
+        gl.useProgram(comaP.pr);
+        gl.uniformMatrix4fv(comaP.u.uVP, false, VP);
+        gl.uniform3f(comaP.u.uHead, hx, hy, hz);
+        s = sideOf(ax, ay, az);
+        gl.uniform3f(comaP.u.uAxis, ax, ay, az);
+        gl.uniform3f(comaP.u.uSide, s[0], s[1], s[2]);
+        gl.uniform2f(comaP.u.uDim, L * 0.10, L * 0.045);
+        gl.uniform3f(comaP.u.uCol, 0.75, 0.85, 1.0);
+        gl.uniform1f(comaP.u.uAlpha, act);
+        gl.bindBuffer(gl.ARRAY_BUFFER, billVB);
+        gl.enableVertexAttribArray(comaP.a.aCorner);
+        gl.vertexAttribPointer(comaP.a.aCorner, 2, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+
       gl.depthMask(true);
       gl.disable(gl.BLEND);
     }
