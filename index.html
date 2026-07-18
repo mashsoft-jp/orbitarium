@@ -322,7 +322,7 @@
     width: 150px;
     accent-color: var(--accent);
   }
-  #speedVal, #zoomVal {
+  #speedVal, #zoomVal, #angleVal {
     font-family: var(--font-num);
     font-variant-numeric: tabular-nums;
     font-size: 11.5px;
@@ -331,6 +331,7 @@
     text-align: left;
     white-space: nowrap;
   }
+  #angleVal { min-width: 38px; }
 
   /* ---- info panel ---- */
   #info {
@@ -529,6 +530,14 @@
     </div>
     <div class="sep"></div>
     <div class="group">
+      <span class="slider" id="angleLabel">角度</span>
+      <button id="angleDown" class="step" aria-label="角度を下げる">−</button>
+      <input type="range" id="angle" min="-87" max="87" value="20" aria-label="カメラ角度">
+      <button id="angleUp" class="step" aria-label="角度を上げる">＋</button>
+      <span id="angleVal"></span>
+    </div>
+    <div class="sep"></div>
+    <div class="group">
       <span class="slider" id="cameraLabel">カメラ</span>
       <button id="viewTopBtn">真上</button>
       <button id="viewDefBtn">デフォルト</button>
@@ -709,7 +718,7 @@
   const UI = {
     ja: {
       title: "Galaxeum — バーチャル宇宙博物館",
-      pause: "⏸ 停止", play: "▶ 再生", speed: "速度", zoom: "ズーム",
+      pause: "⏸ 停止", play: "▶ 再生", speed: "速度", zoom: "ズーム", angle: "角度",
       orbits: "軌道", labels: "名前", reset: "全体表示",
       nowBtn: "現在時刻に合わせる", paused: "SIMULATION PAUSED", ratePrefix: "1秒 = ",
       viewTop: "真上", viewDef: "デフォルト", viewSide: "真横", camera: "カメラ",
@@ -726,7 +735,7 @@
     },
     en: {
       title: "Galaxeum — Virtual Space Museum",
-      pause: "⏸ Pause", play: "▶ Play", speed: "Speed", zoom: "Zoom",
+      pause: "⏸ Pause", play: "▶ Play", speed: "Speed", zoom: "Zoom", angle: "Angle",
       orbits: "Orbits", labels: "Labels", reset: "Overview",
       nowBtn: "Set to current time", paused: "SIMULATION PAUSED", ratePrefix: "1s = ",
       viewTop: "Top", viewDef: "Default", viewSide: "Side", camera: "Camera",
@@ -2007,6 +2016,7 @@
     render(now / 1000);
     updateClock();
     updateZoomUI();
+    updateAngleUI();
     requestAnimationFrame(frame);
   }
 
@@ -2308,6 +2318,48 @@
   }
   bindHold(document.getElementById("zoomOut"), () => stepZoom(-1));
   bindHold(document.getElementById("zoomIn"), () => stepZoom(1));
+
+  // ---------- カメラ角度 (仰角。ドラッグと双方向同期) ----------
+  const angleInput = document.getElementById("angle");
+  const angleVal = document.getElementById("angleVal");
+  const ANGLE_STEPS = [-87, -75, -60, -45, -30, -15, 0, 15, 30, 45, 60, 75, 87];
+  let angleActive = false;
+  let lastAngleStr = "", lastAngleSlider = "";
+  function angleFromSlider() {
+    cam.pitchTgt = angleInput.value * DEG;
+    hideHint();
+  }
+  angleInput.addEventListener("input", angleFromSlider);
+  angleInput.addEventListener("pointerdown", () => { angleActive = true; });
+  window.addEventListener("pointerup", () => { angleActive = false; });
+  // −/＋ はキリのいい角度 (15°刻み + 両端87°) にスナップ
+  function stepAngle(dir) {
+    const cur = cam.pitchTgt / DEG;
+    const next = dir > 0
+      ? ANGLE_STEPS.find((a) => a > cur + 0.5)
+      : [...ANGLE_STEPS].reverse().find((a) => a < cur - 0.5);
+    if (next === undefined) return;
+    cam.pitchTgt = next * DEG;
+    hideHint();
+  }
+  bindHold(document.getElementById("angleDown"), () => stepAngle(-1));
+  bindHold(document.getElementById("angleUp"), () => stepAngle(1));
+  // 現在の仰角をスライダーと数値表示へ反映 (毎フレーム呼ばれる)
+  function updateAngleUI() {
+    const deg = cam.pitch / DEG;
+    if (!angleActive) {
+      const v = String(Math.round(Math.max(-87, Math.min(87, deg))));
+      if (v !== lastAngleSlider) {
+        angleInput.value = v;
+        lastAngleSlider = v;
+      }
+    }
+    const s = Math.round(deg) + "°";
+    if (s !== lastAngleStr) {
+      angleVal.textContent = s;
+      lastAngleStr = s;
+    }
+  }
   // 現在のカメラ距離をスライダーと数値表示へ反映 (毎フレーム呼ばれる)
   function updateZoomUI() {
     if (!zoomActive) {
@@ -2475,6 +2527,7 @@
     document.getElementById("noGL").innerHTML = t.noGL;
     document.getElementById("speedLabel").textContent = t.speed;
     document.getElementById("zoomLabel").textContent = t.zoom;
+    document.getElementById("angleLabel").textContent = t.angle;
     orbitsBtn.textContent = t.orbits;
     labelsBtn.textContent = t.labels;
     document.getElementById("resetBtn").textContent = t.reset;
