@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Orbitarium</title>
+<title>Galaxeum</title>
 <style>
   :root {
     --bg: #04060e;
@@ -468,7 +468,7 @@
 
   <header id="title" class="hud">
     <button id="menuBtn" aria-label="メニュー" aria-haspopup="true">☰</button>
-    <h1>ORBITARIUM</h1>
+    <h1>GALAXEUM</h1>
   </header>
 
   <div id="menu" class="hud" role="menu">
@@ -707,7 +707,7 @@
   let lang = localStorage.getItem("ssLang") === "en" ? "en" : "ja";
   const UI = {
     ja: {
-      title: "Orbitarium — 太陽系シミュレータ",
+      title: "Galaxeum — 太陽系シミュレータ",
       pause: "⏸ 停止", play: "▶ 再生", speed: "速度", zoom: "ズーム",
       orbits: "軌道", labels: "名前", reset: "全体表示",
       nowBtn: "現在時刻に合わせる", paused: "SIMULATION PAUSED", ratePrefix: "1秒 = ",
@@ -722,7 +722,7 @@
       menuNavShow: "天体リストを表示",
     },
     en: {
-      title: "Orbitarium — Solar System Simulator",
+      title: "Galaxeum — Solar System Simulator",
       pause: "⏸ Pause", play: "▶ Play", speed: "Speed", zoom: "Zoom",
       orbits: "Orbits", labels: "Labels", reset: "Overview",
       nowBtn: "Set to current time", paused: "SIMULATION PAUSED", ratePrefix: "1s = ",
@@ -2394,7 +2394,7 @@
     };
     aboutEl.innerHTML =
       `<button id="aboutClose" aria-label="close">✕</button>` +
-      `<h2>ORBITARIUM</h2>` +
+      `<h2>GALAXEUM</h2>` +
       `<h3>${c.lic}</h3><p>${c.licBody}</p>` +
       `<h3>${c.img}</h3><p>${c.imgBody}</p>` +
       `<table><tbody>${rows}</tbody></table>` +
