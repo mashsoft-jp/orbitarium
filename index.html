@@ -439,18 +439,22 @@
     #timeText { font-size: 13px; }
     #nowBtn { font-size: 9px; padding: 2px 8px; margin-top: 4px; }
     input[type="range"] { width: 92px; }
+    /* 情報パネル: 操作パネルの直上に、同程度の高さで内部スクロール */
     #info {
       top: auto;
-      bottom: calc(96px + env(safe-area-inset-bottom, 0px));
-      transform: translateX(16px);
-      width: min(264px, calc(100vw - 32px));
-      max-height: 42vh;
+      left: 8px;
+      right: 8px;
+      bottom: calc(190px + env(safe-area-inset-bottom, 0px));
+      width: auto;
+      max-height: 200px;
       overflow-y: auto;
+      scrollbar-width: thin;
+      transform: translateY(8px);
     }
     #info.open { transform: none; }
     #hint { display: none; }
     #menu { top: 60px; }
-    #navPanel { top: 60px; max-height: calc(100vh - 200px); }
+    #navPanel { top: 60px; max-height: 40vh; }
     #masterToggles button { padding: 3px 9px; font-size: 10px; }
     #navExpand { top: 60px; }
     #nav { gap: 3px; }
