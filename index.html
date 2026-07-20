@@ -1448,8 +1448,13 @@
   // ---------- 軌道線 ----------
   //   折れ線近似の矢高 (弦と真の楕円の距離 ≈ R(2π/N)²/8) が天体半径の3割以下に
   //   なるよう軌道ごとに分割数を決める。サンプルは離心近点角の等分 (幾何的に均等)。
+  //   頂点はアンカー (基準点) 相対で焼き込む。太陽中心の生座標のままだと f32 の
+  //   量子化誤差が「太陽からの距離 × 1e-7」(外縁部で数百km) になり、外縁天体に
+  //   接近した際に線がぶれるため。カメラがアンカーから離れすぎたら焼き直す。
   const orbitVBs = PLANETS.map(() => gl.createBuffer());
-  function rebuildOrbits() {
+  const ORB_ANCHOR = [0, 0, 0];
+  function rebuildOrbits(ax, ay, az) {
+    ORB_ANCHOR[0] = ax; ORB_ANCHOR[1] = ay; ORB_ANCHOR[2] = az;
     const v = [0, 0, 0];
     const w = [0, 0, 0];
     PLANETS.forEach((p, pi) => {
@@ -1457,7 +1462,7 @@
       const n = Math.min(12288, Math.max(512,
         Math.ceil(2 * Math.PI * Math.sqrt(R / (8 * 0.3 * bodyR(p))))));
       p.orbN = n;
-      const arr = new Float32Array((n + 1) * 3);
+      const arr = p.orbArr || (p.orbArr = new Float32Array((n + 1) * 3));
       const be = p.a * Math.sqrt(1 - p.e * p.e);
       for (let i = 0; i <= n; i++) {
         const E = 2 * Math.PI * i / n;
@@ -1467,13 +1472,13 @@
         v[1] = p.m[2] * xo + p.m[3] * yo;
         v[2] = p.m[4] * xo + p.m[5] * yo;
         toWorld(v, w);
-        arr[i*3] = w[0]; arr[i*3+1] = w[1]; arr[i*3+2] = w[2];
+        arr[i*3] = w[0] - ax; arr[i*3+1] = w[1] - ay; arr[i*3+2] = w[2] - az;
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, orbitVBs[pi]);
       gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
     });
   }
-  rebuildOrbits();
+  rebuildOrbits(0, 0, 0);
 
   // 衛星軌道の単位円 (XZ 平面。基底・スケール・平行移動は描画時のモデル行列で適用)
   const SAT_ORB_N = 192;
@@ -1557,7 +1562,6 @@
 
   // ---------- 描画 ----------
   let VP = mIdent(), Vm = mIdent();
-  const VPW = mIdent();         // ワールド座標のままの線・点用 (VP × 平行移動)
   let EYE = [0, 0, 0];          // カメラ位置 (描画はカメラ相対座標で行う)
   const screenPos = new Map();  // key -> {x, y, r, w}
 
@@ -1568,7 +1572,7 @@
     A: new Float32Array(16),    // 汎用
     rx: new Float32Array(16), ry: new Float32Array(16), rot: new Float32Array(16),
     model: new Float32Array(16), mvp: new Float32Array(16),
-    t: [0, 0, 0], tgt: [0, 0, 0], negEye: [0, 0, 0],
+    t: [0, 0, 0], tgt: [0, 0, 0],
     v: [0, 0, 0], v2: [0, 0, 0],
   };
 
@@ -1628,10 +1632,14 @@
     SCR.tgt[2] = cam.focus[2] - eye[2];
     mLookAt(ZERO3, SCR.tgt, UP3, Vm);
     mMul(P, Vm, VP);
-    // ワールド座標のまま描く線・点 (軌道線・星屑等) 用: 誤差はサブピクセルなので許容
-    SCR.negEye[0] = -eye[0]; SCR.negEye[1] = -eye[1]; SCR.negEye[2] = -eye[2];
-    mTRS(SCR.negEye, null, 1, SCR.A);
-    mMul(VP, SCR.A, VPW);
+    // 軌道線アンカー: カメラが離れすぎると頂点の f32 誤差が画面に出るため焼き直す
+    {
+      const dx = eye[0] - ORB_ANCHOR[0], dy = eye[1] - ORB_ANCHOR[1], dz = eye[2] - ORB_ANCHOR[2];
+      const lim = cam.dist * 1000;
+      if (dx * dx + dy * dy + dz * dz > lim * lim) {
+        rebuildOrbits(cam.focus[0], cam.focus[1], cam.focus[2]);
+      }
+    }
 
     gl.clearColor(0.016, 0.023, 0.055, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -1659,7 +1667,12 @@
     // --- 軌道線 (天体ごとの表示フラグ) ---
     {
       gl.useProgram(lineP.pr);
-      gl.uniformMatrix4fv(lineP.u.uVP, false, VPW);
+      // アンカー相対の頂点 → カメラ相対へ (平行移動は f64 で計算してから f32 行列に)
+      SCR.t[0] = ORB_ANCHOR[0] - eye[0];
+      SCR.t[1] = ORB_ANCHOR[1] - eye[1];
+      SCR.t[2] = ORB_ANCHOR[2] - eye[2];
+      mTRS(SCR.t, null, 1, SCR.A);
+      gl.uniformMatrix4fv(lineP.u.uVP, false, mMul(VP, SCR.A, SCR.mvp));
       PLANETS.forEach((p, pi) => {
         if (!p.showOrbit) return;
         const sel = selected === p;
@@ -1694,12 +1707,13 @@
         const x = r * Math.cos(th), z = -r * Math.sin(th);
         const y = r * Math.sin(A.inc) * Math.sin(th + A.node);
         const o = i * 7;
-        astArr[o] = x; astArr[o+1] = y; astArr[o+2] = z;
+        // カメラ相対 (毎フレーム f64 で再計算しているので引き算はここで済ませる)
+        astArr[o] = x - eye[0]; astArr[o+1] = y - eye[1]; astArr[o+2] = z - eye[2];
         astArr[o+3] = 1.4;
         astArr[o+4] = 0.62; astArr[o+5] = 0.65; astArr[o+6] = 0.72;
       }
       gl.useProgram(pointP.pr);
-      gl.uniformMatrix4fv(pointP.u.uVP, false, VPW);
+      gl.uniformMatrix4fv(pointP.u.uVP, false, VP);
       gl.uniform1f(pointP.u.uScale, DPR);
       gl.uniform1f(pointP.u.uAlpha, 0.5);
       gl.bindBuffer(gl.ARRAY_BUFFER, astVB);
@@ -1770,7 +1784,7 @@
         }
         const o = nMark * 7;
         const wp = posW.get(b.key);
-        markArr[o] = wp[0]; markArr[o+1] = wp[1]; markArr[o+2] = wp[2];
+        markArr[o] = wp[0] - eye[0]; markArr[o+1] = wp[1] - eye[1]; markArr[o+2] = wp[2] - eye[2];
         markArr[o+3] = 4.0;
         markArr[o+4] = b.colA[0]; markArr[o+5] = b.colA[1]; markArr[o+6] = b.colA[2];
         nMark++;
@@ -1781,7 +1795,7 @@
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.depthMask(false);
       gl.useProgram(pointP.pr);
-      gl.uniformMatrix4fv(pointP.u.uVP, false, VPW);
+      gl.uniformMatrix4fv(pointP.u.uVP, false, VP);
       gl.uniform1f(pointP.u.uScale, DPR);
       gl.uniform1f(pointP.u.uAlpha, 0.95);
       gl.bindBuffer(gl.ARRAY_BUFFER, markVB);
