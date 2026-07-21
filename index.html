@@ -2176,6 +2176,10 @@
       return;
     }
     openInfo(body);
+    // 子天体を直接選択したときは親グループを展開し、リスト内に見えるようスクロール
+    EXPAND_BY_CHILD.get(body.key)?.();
+    const navBtn = navEl.querySelector('button.body[data-key="' + body.key + '"]');
+    if (navBtn) navBtn.scrollIntoView({ block: "nearest", inline: "nearest" });
     if (fly) {
       // 天体からの接近距離 (km)。サイズに応じて調整、未指定は10万km
       const zoomKm = {
@@ -2282,6 +2286,7 @@
   ];
   const CAT_BTNS = [];             // { btn, cat } — 言語切替用
   const CAT_TGLS = [];             // [children, 軌道トグル, 名前トグル]
+  const EXPAND_BY_CHILD = new Map();  // 子天体キー → 親グループを展開する関数
   function makeCatGroup(cat, children) {
     const row = document.createElement("div");
     row.className = "row";
@@ -2314,6 +2319,7 @@
       ex.textContent = v ? "▾" : "▸";
       for (const r2 of childRows) r2.style.display = v ? "flex" : "none";
     };
+    for (const c of children) EXPAND_BY_CHILD.set(c.key, () => setExp(true));
     ex.addEventListener("click", () => setExp(!expanded));
     btn.addEventListener("click", () => setExp(!expanded));
     // カテゴリの ◌/N は子をまとめて切替
@@ -2347,11 +2353,13 @@
         navEl.appendChild(r2);
         return r2;
       });
-      ex.addEventListener("click", () => {
-        b.expanded = !b.expanded;
-        ex.textContent = b.expanded ? "▾" : "▸";
-        for (const r2 of satRows) r2.style.display = b.expanded ? "flex" : "none";
-      });
+      const setSatExp = (v) => {
+        b.expanded = v;
+        ex.textContent = v ? "▾" : "▸";
+        for (const r2 of satRows) r2.style.display = v ? "flex" : "none";
+      };
+      ex.addEventListener("click", () => setSatExp(!b.expanded));
+      for (const s of sats) EXPAND_BY_CHILD.set(s.key, () => setSatExp(true));
     } else {
       navEl.appendChild(row);
     }
