@@ -538,6 +538,7 @@
   <div id="menu" class="hud" role="menu">
     <button id="menuLang" role="menuitem"></button>
     <button id="menuUnit" role="menuitem"></button>
+    <button id="menuShare" role="menuitem"></button>
     <button id="menuAbout" role="menuitem"></button>
   </div>
 
@@ -789,6 +790,8 @@
       menuAbout: "ライセンス・クレジット",
       menuUnitToMi: "距離をマイル表示",
       menuUnitToKm: "距離を km 表示",
+      menuShare: "共有リンクをコピー",
+      menuShareDone: "コピーしました",
       menuNavHide: "天体リストを隠す",
       menuNavShow: "天体リストを表示",
     },
@@ -806,6 +809,8 @@
       menuAbout: "License & Credits",
       menuUnitToMi: "Distances in miles",
       menuUnitToKm: "Distances in km",
+      menuShare: "Copy shareable link",
+      menuShareDone: "Copied!",
       menuNavHide: "Hide body list",
       menuNavShow: "Show body list",
     },
@@ -2698,6 +2703,71 @@
   navCollapseBtn.addEventListener("click", () => { navVisible = false; applyNavVisible(); });
   navExpandBtn.addEventListener("click", () => { navVisible = true; applyNavVisible(); });
 
+  // ---------- シーン共有URL ----------
+  // 日時・選択天体・カメラ (ズーム/角度/方位)・速度・再生状態を URL に載せる。
+  // バックエンド不要。起動時に applyShareURL() で復元する。
+  const menuShareBtn = document.getElementById("menuShare");
+  function buildShareURL() {
+    const p = new URLSearchParams();
+    p.set("d", new Date(J2000 + simDays * DAY_MS).toISOString().slice(0, 16));  // UTC 分精度
+    if (selected) p.set("sel", selected.key);
+    p.set("z", cam.distTgt.toPrecision(6));   // world単位は桁が小さいので有効桁で保持
+    p.set("a", cam.pitchTgt.toFixed(4));
+    p.set("y", cam.yawTgt.toFixed(4));
+    p.set("spd", daysPerSec.toPrecision(6));
+    p.set("play", playing ? "1" : "0");
+    return location.origin + location.pathname + "?" + p.toString();
+  }
+  function applyShareURL() {
+    const q = new URLSearchParams(location.search);
+    if (!q.has("d") && !q.has("sel") && !q.has("z")) return false;
+    const d = q.get("d");
+    if (d) {
+      let iso = d;
+      if (iso.length === 10) iso += "T00:00:00";
+      else if (iso.length === 16) iso += ":00";
+      if (!/[zZ]$/.test(iso)) iso += "Z";
+      const t = Date.parse(iso);
+      if (isFinite(t)) simDays = (t - J2000) / DAY_MS;
+    }
+    const spd = parseFloat(q.get("spd"));
+    if (isFinite(spd) && spd > 0) {
+      daysPerSec = spd;
+      speedInput.value = Math.max(0, Math.min(100, Math.round(18 * Math.log(spd * 86400) / Math.log(60))));
+      speedVal.textContent = T().ratePrefix + fmtDays(daysPerSec);
+    }
+    if (q.get("play") === "0") setPlaying(false);
+    else if (q.get("play") === "1") setPlaying(true);
+    const selKey = q.get("sel");
+    const selBody = selKey ? BODY_BY_KEY.get(selKey) : null;
+    if (selBody) {
+      select(selBody, false);           // fly させず、カメラは URL の値で直接復元
+      updatePositions();
+      const w = posW.get(selBody.key);
+      cam.focusTgt[0] = w[0]; cam.focusTgt[1] = w[1]; cam.focusTgt[2] = w[2];
+      cam.focus[0] = w[0]; cam.focus[1] = w[1]; cam.focus[2] = w[2];
+    }
+    const z = parseFloat(q.get("z")), a = parseFloat(q.get("a")), y = parseFloat(q.get("y"));
+    if (isFinite(z)) { cam.distTgt = Math.min(1400, z); cam.dist = cam.distTgt; }
+    if (isFinite(a)) { cam.pitchTgt = Math.max(-1.52, Math.min(1.52, a)); cam.pitch = cam.pitchTgt; }
+    if (isFinite(y)) { cam.yawTgt = y; cam.yaw = y; }
+    return true;
+  }
+  let shareResetTimer = 0;
+  menuShareBtn.addEventListener("click", () => {
+    const url = buildShareURL();
+    const done = () => {
+      menuShareBtn.textContent = T().menuShareDone;
+      clearTimeout(shareResetTimer);
+      shareResetTimer = setTimeout(() => { menuShareBtn.textContent = T().menuShare; }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done, () => { prompt("URL", url); });
+    } else {
+      prompt("URL", url);
+    }
+  });
+
   function setMenu(open) {
     menuEl.classList.toggle("open", open);
     menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
@@ -2778,6 +2848,7 @@
     document.getElementById("viewSideBtn").textContent = t.viewSide;
     document.getElementById("nowBtn").textContent = t.nowBtn;
     menuLangBtn.textContent = t.menuLang;
+    menuShareBtn.textContent = t.menuShare;
     menuAboutBtn.textContent = t.menuAbout;
     updateUnitLabel();
     applyNavVisible();
@@ -2838,6 +2909,8 @@
       cam.pitch = cam.pitchTgt;
     }
   }
+  // 共有URLのパラメータがあれば localStorage 復元より優先して適用
+  applyShareURL();
   requestAnimationFrame(frame);
 })();
 </script>
