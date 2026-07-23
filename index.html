@@ -441,29 +441,6 @@
     background: none; border: 1px solid var(--line); border-radius: 3px; cursor: pointer;
   }
   #obsGeo:hover { color: var(--text); }
-  /* 空を見上げる (地上ビュー入口) */
-  #skyEnter {
-    display: block; width: 100%; margin: 12px 0 0; padding: 8px;
-    font-size: 12px; letter-spacing: 0.06em; color: var(--accent);
-    background: rgba(242, 178, 62, 0.10); border: 1px solid var(--accent-dim);
-    border-radius: 5px; cursor: pointer; transition: background 0.15s;
-  }
-  #skyEnter[hidden] { display: none; }
-  #skyEnter:hover { background: rgba(242, 178, 62, 0.18); }
-  /* 地上ビューを出る */
-  #skyExit {
-    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-    z-index: 15; padding: 7px 16px; font-size: 12px; letter-spacing: 0.06em;
-    color: var(--text); background: rgba(16, 22, 42, 0.82);
-    border: 1px solid var(--line); border-radius: 20px; cursor: pointer;
-    backdrop-filter: blur(4px);
-  }
-  #skyExit[hidden] { display: none; }
-  #skyExit:hover { border-color: var(--accent-dim); }
-  @media (max-width: 720px) {
-    #app.groundMode #title { display: none; }
-    #app.groundMode #skyExit { top: 12px; left: 12px; transform: none; }
-  }
   #info table { width: 100%; border-collapse: collapse; color: var(--text); font-family: var(--font-ui); }
   #info td {
     padding: 4.5px 0;
@@ -678,11 +655,8 @@
     </div>
     <table><tbody id="infoRows"></tbody></table>
     <p class="fact" id="infoFact"></p>
-    <button id="skyEnter" hidden></button>
     <p class="credit" id="infoCredit"></p>
   </aside>
-
-  <button id="skyExit" hidden></button>
 
   <div id="hint">ドラッグで回転 ・ ホイール / ピンチでズーム ・ 天体クリックで接近</div>
 
@@ -708,12 +682,13 @@
     <button id="angleUp" class="step spaceOnly" aria-label="角度を上げる">＋</button>
     <span id="angleVal" class="spaceOnly"></span>
 
-    <span class="slider spaceOnly" id="cameraLabel">カメラ</span>
-    <div class="camRow spaceOnly">
+    <span class="slider" id="cameraLabel">カメラ</span>
+    <div class="camRow">
       <button id="viewTopBtn">真上</button>
       <button id="viewDefBtn">デフォルト</button>
       <button id="viewSideBtn">真横</button>
       <button id="resetBtn">全体表示</button>
+      <button id="viewGroundBtn">地上</button>
     </div>
 
     <!-- 地上ビュー用 -->
@@ -921,7 +896,7 @@
       orbits: "軌道", labels: "名前", reset: "全体表示",
       nowBtn: "現在時刻に合わせる", paused: "SIMULATION PAUSED", ratePrefix: "1秒 = ",
       viewTop: "真上", viewDef: "デフォルト", viewSide: "真横", camera: "カメラ",
-      gFovLabel: "ズーム", gAzLabel: "方位", gAltLabel: "高度",
+      viewGround: "地上", gFovLabel: "ズーム", gAzLabel: "方位", gAltLabel: "高度",
       hint: "ドラッグで回転 ・ ホイール / ピンチでズーム ・ 天体クリックで接近",
       noGL: "お使いの環境では WebGL が利用できないため、<br>3D 表示を開始できませんでした。",
       imgPrefix: "画像: ", procTex: "テクスチャ: シェーダによる生成 (実写ではありません)",
@@ -938,7 +913,6 @@
         tabFacts: "基本情報", tabObs: "地球から見る",
         loc: "観測地", geo: "現在地", custom: "カスタム",
         N: "北", S: "南", E: "東", W: "西",
-        skyEnter: "空を見上げる (3D)", skyExit: "宇宙ビューに戻る",
         az: "方位", alt: "高度", rise: "出", transit: "南中", set: "入",
         mag: "視等級", phase: "満ち欠け", size: "見かけの大きさ", elong: "太陽離角", dist: "地球からの距離",
         below: "地平線下", noRise: "昇らない", noSet: "沈まない", always: "沈まない",
@@ -955,7 +929,7 @@
       orbits: "Orbits", labels: "Labels", reset: "Overview",
       nowBtn: "Set to current time", paused: "SIMULATION PAUSED", ratePrefix: "1s = ",
       viewTop: "Top", viewDef: "Default", viewSide: "Side", camera: "Camera",
-      gFovLabel: "Zoom", gAzLabel: "Azimuth", gAltLabel: "Alt",
+      viewGround: "Ground", gFovLabel: "Zoom", gAzLabel: "Azimuth", gAltLabel: "Alt",
       hint: "Drag to rotate · Wheel / pinch to zoom · Click a body to approach",
       noGL: "WebGL is not available in this environment,<br>so the 3D view could not be started.",
       imgPrefix: "Imagery: ", procTex: "Texture: procedurally generated (not actual imagery)",
@@ -972,7 +946,6 @@
         tabFacts: "Facts", tabObs: "From Earth",
         loc: "Site", geo: "My location", custom: "Custom",
         N: "N", S: "S", E: "E", W: "W",
-        skyEnter: "Look up at the sky (3D)", skyExit: "Back to space view",
         az: "Azimuth", alt: "Altitude", rise: "Rise", transit: "Transit", set: "Set",
         mag: "Magnitude", phase: "Illumination", size: "Apparent size", elong: "Elongation", dist: "Distance from Earth",
         below: "below horizon", noRise: "never rises", noSet: "never sets", always: "never sets",
@@ -2032,8 +2005,8 @@
       octx.fillText(bName(v.b), s.x, s.y - 11);
     }
   }
-  const skyEnterBtn = document.getElementById("skyEnter");
-  const skyExitBtn = document.getElementById("skyExit");
+  // 地上ビューはカメラ視点の一つとして扱う (カメラ行の「地上」ボタンで出入り)
+  const viewGroundBtn = document.getElementById("viewGroundBtn");
   // 指定天体の方向へ地上カメラを向ける (地平線下なら下向きにして必ず視野へ)
   function aimGroundAt(body) {
     if (!body || body.key === "earth") return false;
@@ -2043,20 +2016,19 @@
     return true;
   }
   function enterGround() {
-    if (!aimGroundAt(currentInfoBody)) { gAz = Math.PI; gAlt = 0.4; }
+    if (groundView) return;
+    if (!aimGroundAt(selected || currentInfoBody)) { gAz = Math.PI; gAlt = 0.4; }
     groundView = true;
     document.getElementById("app").classList.add("groundMode");
-    skyExitBtn.textContent = T().obs.skyExit;
-    skyExitBtn.hidden = false;
+    viewGroundBtn.classList.add("on");
     infoPanel.classList.remove("open");
   }
   function exitGround() {
     groundView = false;
     document.getElementById("app").classList.remove("groundMode");
-    skyExitBtn.hidden = true;
+    viewGroundBtn.classList.remove("on");
   }
-  skyEnterBtn.addEventListener("click", enterGround);
-  skyExitBtn.addEventListener("click", exitGround);
+  viewGroundBtn.addEventListener("click", enterGround);
   function hitTestGround(px, py) {
     let best = null, bd = 30 * 30;
     for (const v of groundVis) {
@@ -2806,12 +2778,9 @@
       document.getElementById("infoRows").innerHTML = r.rows;
       document.getElementById("infoFact").textContent = r.fact;
       credEl.textContent = body.key === "earth" ? "" : t.obs.note;
-      skyEnterBtn.textContent = t.obs.skyEnter;
-      skyEnterBtn.hidden = body.key === "earth";
       lastObsStr = r.rows;
     } else {
       obsLocEl.hidden = true;
-      skyEnterBtn.hidden = true;
       const d = lang === "en" ? EN_DATA[body.key] : null;
       document.getElementById("infoRows").innerHTML =
         (d ? d.rows : body.rows).map(([kk, v]) => `<tr><td>${kk}</td><td>${v}</td></tr>`).join("");
@@ -3330,11 +3299,13 @@
     cam.pitchTgt = p;
     hideHint();
   }
-  document.getElementById("viewTopBtn").addEventListener("click", () => setPitch(1.52));   // 真上
-  document.getElementById("viewSideBtn").addEventListener("click", () => setPitch(0.02));  // 真横
+  // 他のカメラ視点を選んだら地上ビューを抜けて宇宙ビューへ
+  document.getElementById("viewTopBtn").addEventListener("click", () => { exitGround(); setPitch(1.52); });   // 真上
+  document.getElementById("viewSideBtn").addEventListener("click", () => { exitGround(); setPitch(0.02); });  // 真横
 
   // デフォルト: 太陽中心に内惑星 (火星軌道まで) がちょうど収まる俯瞰
   function goDefaultView() {
+    exitGround();
     select(null, false);
     lastCenter = null;                             // 太陽中心へ戻るので下限も太陽サイズに
     cam.focusTgt[0] = 0; cam.focusTgt[1] = 0; cam.focusTgt[2] = 0;
@@ -3347,6 +3318,7 @@
   document.getElementById("viewDefBtn").addEventListener("click", goDefaultView);
 
   document.getElementById("resetBtn").addEventListener("click", () => {
+    exitGround();
     select(null, false);
     lastCenter = null;
     cam.focusTgt[0] = 0; cam.focusTgt[1] = 0; cam.focusTgt[2] = 0;
@@ -3535,6 +3507,7 @@
     document.getElementById("viewTopBtn").textContent = t.viewTop;
     document.getElementById("viewDefBtn").textContent = t.viewDef;
     document.getElementById("viewSideBtn").textContent = t.viewSide;
+    viewGroundBtn.textContent = t.viewGround;
     document.getElementById("gFovLabel").textContent = t.gFovLabel;
     document.getElementById("gAzLabel").textContent = t.gAzLabel;
     document.getElementById("gAltLabelTop").textContent = t.gAltLabel;
