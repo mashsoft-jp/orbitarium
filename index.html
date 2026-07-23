@@ -469,7 +469,6 @@
   }
   #skyExit[hidden] { display: none; }
   #skyExit:hover { border-color: var(--accent-dim); }
-  #app.groundMode #navPanel, #app.groundMode #navExpand { display: none; }
   @media (max-width: 720px) {
     #app.groundMode #title { display: none; }
     #app.groundMode #skyExit { top: 12px; left: 12px; transform: none; }
@@ -1839,8 +1838,9 @@
   const MIN_FOV = 0.25 * DEG, MAX_FOV = 90 * DEG;   // 望遠鏡並みの拡大まで許可
   const _fwd = [0, 0, 0], _gp = [0, 0, 0], gVP = mIdent();
   let groundVB = null, groundPtVB = null, horizonVB = null, horizonN = 0;
-  const SKY_BODIES = [SUN, MOON].concat(
-    PLANETS.filter((p) => ["mercury", "venus", "mars", "jupiter", "saturn", "uranus", "neptune"].includes(p.key)));
+  // 地上ビューに出す天体: 太陽・月・全惑星 (準惑星・小惑星・彗星含む)。
+  // 他の衛星は低倍率では母惑星の点と重なるため除外
+  const SKY_BODIES = [SUN, MOON].concat(PLANETS.filter((p) => p.key !== "earth"));
   const groundPtArr = new Float32Array(SKY_BODIES.length * 7);
   function azAltDir(azDeg, altDeg, out) {
     const a = azDeg * DEG, e = altDeg * DEG, ca = Math.cos(e);
@@ -2045,13 +2045,16 @@
   }
   const skyEnterBtn = document.getElementById("skyEnter");
   const skyExitBtn = document.getElementById("skyExit");
+  // 指定天体の方向へ地上カメラを向ける (地平線下なら下向きにして必ず視野へ)
+  function aimGroundAt(body) {
+    if (!body || body.key === "earth") return false;
+    const c = computeObs(body);
+    gAz = c.az * DEG;
+    gAlt = Math.max(-1.3, Math.min(1.4, c.alt * DEG));
+    return true;
+  }
   function enterGround() {
-    if (currentInfoBody && currentInfoBody.key !== "earth") {
-      const c = computeObs(currentInfoBody);
-      gAz = c.az * DEG;
-      // 選択天体を中央に。地平線下なら下向きにして必ず視野へ入れる
-      gAlt = Math.max(-1.3, Math.min(1.4, c.alt * DEG));
-    } else { gAz = Math.PI; gAlt = 0.4; }
+    if (!aimGroundAt(currentInfoBody)) { gAz = Math.PI; gAlt = 0.4; }
     groundView = true;
     document.getElementById("app").classList.add("groundMode");
     skyExitBtn.textContent = T().obs.skyExit;
@@ -2623,7 +2626,10 @@
     EXPAND_BY_CHILD.get(body.key)?.();
     const navBtn = navEl.querySelector('button.body[data-key="' + body.key + '"]');
     if (navBtn) navBtn.scrollIntoView({ block: "nearest", inline: "nearest" });
-    if (fly) {
+    if (fly && groundView) {
+      // 地上ビュー中はカメラ飛行の代わりに、その天体の方向へ視点を向ける
+      aimGroundAt(body);
+    } else if (fly) {
       // 天体からの接近距離 (km)。サイズに応じて調整、未指定は10万km
       const zoomKm = {
         mercury: 50000, moon: 30000, mars: 50000,
