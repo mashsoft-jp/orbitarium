@@ -1836,9 +1836,16 @@
 
   function bodyModel(b, r) {
     const spin = b.rot ? 2 * Math.PI * simDays / b.rot + (b.spin0 || 0) : 0;
-    mRotX(-(b.tilt || 0) * DEG, SCR.rx);
-    mRotY(spin, SCR.ry);
-    mMul(SCR.rx, SCR.ry, SCR.rot);
+    // 土星は環との整合のため実際の極方向 (SATURN_POLE_W) を使う。他は
+    // ワールドX軸まわりの傾斜で近似 (傾斜角のみ正確、軸の方位は簡略)
+    if (b.key === "saturn") {
+      mRotY(spin, SCR.ry);
+      mMul(SAT_ROT, SCR.ry, SCR.rot);
+    } else {
+      mRotX(-(b.tilt || 0) * DEG, SCR.rx);
+      mRotY(spin, SCR.ry);
+      mMul(SCR.rx, SCR.ry, SCR.rot);
+    }
     // 平行移動はカメラ相対 (float64 で差を取ってから f32 化することで震えを防ぐ)
     const t = posW.get(b.key);
     SCR.t[0] = t[0] - EYE[0]; SCR.t[1] = t[1] - EYE[1]; SCR.t[2] = t[2] - EYE[2];
@@ -2095,10 +2102,20 @@
       for (const bb of bigBodies) {
         const b = bb.b, R = bb.wr;
         // 観測者(原点)を向く姿勢・北を上に。テクスチャ中心が手前を向く (月は表側が見える)
-        const nx = -bb.dx, ny = -bb.dy, nz = -bb.dz;
-        const upd = ny;
-        let yx = -upd*nx, yy = 1 - upd*ny, yz = -upd*nz;
-        const yl = Math.hypot(yx, yy, yz) || 1; yx/=yl; yy/=yl; yz/=yl;
+        let nx = -bb.dx, ny = -bb.dy, nz = -bb.dz;
+        let yx, yy, yz;
+        if (b.key === "saturn") {
+          // 土星は縞を環と揃えるため、上方向 = 実際の極方向 (地上フレーム)
+          const P = worldDirToGround(SATURN_POLE_W, SCR.v);
+          yx = P[0]; yy = P[1]; yz = P[2];
+          const d = nx * yx + ny * yy + nz * yz;
+          nx -= d * yx; ny -= d * yy; nz -= d * yz;
+          const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+        } else {
+          const upd = ny;
+          yx = -upd * nx; yy = 1 - upd * ny; yz = -upd * nz;
+          const yl = Math.hypot(yx, yy, yz) || 1; yx /= yl; yy /= yl; yz /= yl;
+        }
         const zx = ny*yz - nz*yy, zy = nz*yx - nx*yz, zz = nx*yy - ny*yx;
         const m = gM64;   // f64 のまま合成し、mMul の出力 (f32) だけを GPU へ
         m[0]=nx*R; m[1]=ny*R; m[2]=nz*R; m[3]=0;
@@ -2123,8 +2140,7 @@
       // 土星の環 (球として描かれる倍率のときのみ。軸の向きを地上フレームへ変換)
       const satBB = bigBodies.find((x) => x.b.key === "saturn");
       if (satBB) {
-        const tl = -satBB.b.tilt * DEG;
-        const Ag = worldDirToGround([0, Math.cos(tl), Math.sin(tl)], _gp);
+        const Ag = worldDirToGround(SATURN_POLE_W, _gp);
         // y = 環の法線 とする正規直交基底 (環は軸対称なので面内回転は任意)
         let xx = -Ag[2], xy = 0, xz = Ag[0];
         let xl = Math.hypot(xx, xy, xz);
@@ -2479,16 +2495,14 @@
       const r = bodyR(sat);
       const sp = posW.get(sat.key);
       SCR.t[0] = sp[0] - eye[0]; SCR.t[1] = sp[1] - eye[1]; SCR.t[2] = sp[2] - eye[2];
-      mRotX(-sat.tilt * DEG, SCR.rx);
-      const model = mTRS(SCR.t, SCR.rx, r, SCR.model);
+      const model = mTRS(SCR.t, SAT_ROT, r, SCR.model);   // 実際の極方向で環を配置
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.depthMask(false);
       gl.useProgram(ringP.pr);
       gl.uniformMatrix4fv(ringP.u.uMVP, false, mMul(VP, model, SCR.mvp));
       gl.uniformMatrix4fv(ringP.u.uModel, false, model);
-      const tl = -sat.tilt * DEG;
-      gl.uniform3f(ringP.u.uAxis, 0, Math.cos(tl), Math.sin(tl));
+      gl.uniform3f(ringP.u.uAxis, SATURN_POLE_W[0], SATURN_POLE_W[1], SATURN_POLE_W[2]);
       gl.uniform3f(ringP.u.uSun, -eye[0], -eye[1], -eye[2]);
       gl.bindBuffer(gl.ARRAY_BUFFER, ringVB);
       gl.enableVertexAttribArray(ringP.a.aPos);
@@ -2872,6 +2886,27 @@
 
   // ---------- 地球からの観測モード (クライアント計算, 近似) ----------
   const ECL = 23.4393 * DEG, RS_RATE = 15.041;   // 黄道傾斜, 時角の進み (度/時)
+  // 土星の自転軸 (環の法線) の実方向: 赤経40.589°・赤緯83.537° (ICRF)。
+  // 環の見かけの開閉 (約15年周期で真横⇄最大±27°) を正しく再現するために使う
+  const SATURN_POLE_W = (() => {
+    const ra = 40.589 * DEG, dec = 83.537 * DEG;
+    const xq = Math.cos(dec) * Math.cos(ra), yq = Math.cos(dec) * Math.sin(ra), zq = Math.sin(dec);
+    const ye = yq * Math.cos(ECL) + zq * Math.sin(ECL);    // 赤道 → 黄道
+    const ze = -yq * Math.sin(ECL) + zq * Math.cos(ECL);
+    return [xq, ze, -ye];                                   // 黄道 → ワールド (toWorld と同じ軸対応)
+  })();
+  // 極方向を y 軸とする回転行列 (土星の本体・環のモデル用。x/z は軸対称なので任意)
+  const SAT_ROT = (() => {
+    const A = SATURN_POLE_W;
+    let xx = -A[2], xz = A[0];
+    const xl = Math.hypot(xx, xz) || 1; xx /= xl; xz /= xl;
+    const o = new Float32Array(16);
+    o[0] = xx; o[1] = 0; o[2] = xz;
+    o[4] = A[0]; o[5] = A[1]; o[6] = A[2];
+    o[8] = -xz * A[1]; o[9] = xz * A[0] - xx * A[2]; o[10] = xx * A[1];
+    o[15] = 1;
+    return o;
+  })();
   let obsLat = parseFloat(localStorage.getItem("ssLat"));
   let obsLon = parseFloat(localStorage.getItem("ssLon"));
   if (!isFinite(obsLat) || !isFinite(obsLon)) { obsLat = 35.68; obsLon = 139.69; }   // 既定: 東京
