@@ -1825,8 +1825,24 @@
   let groundView = false;
   let gAz = 0, gAlt = 0.45, gFov = 60 * DEG;            // 視線方位・高度 (rad)・画角
   let gAzTgt = 0, gAltTgt = 0.45, gFovTgt = 60 * DEG;   // 目標値 (宇宙ビュー同様に緩和で追従)
-  const MIN_FOV = 0.003 * DEG, MAX_FOV = 90 * DEG;  // 画角下限 ≈11秒角 (×約38,000)。遠い惑星も円盤に見える
-  const _fwd = [0, 0, 0], _gp = [0, 0, 0], gVP = mIdent();
+  let gTrack = false;   // 選択天体を自動追尾 (高倍率では日周運動で流れるため必須。手動操作で解除)
+  let gTrkKey = "", gTrkAz = 0, gTrkAlt = 0;   // 追尾用: 前フレームの天体の方位/高度
+  const MAX_FOV = 90 * DEG;
+  const GMIN_DEFAULT = 0.003 * DEG;   // 既定の画角下限 ≈11秒角 (×約38,000)
+  // 天体別の動的な画角下限: 注目中の天体が画面の約9割を占めるまで拡大できる。
+  // 遠く視直径の小さい天体ほど下限が小さくなる (=より高倍率)
+  function gMinFov() {
+    const b = selected || lastCenter;
+    if (!b || b.key === "earth") return GMIN_DEFAULT;
+    const c = computeObs(b);
+    const angDiam = 2 * Math.asin(Math.min(0.9, b.rkm / (c.distAU * AU_KM)));
+    return Math.max(2e-9, Math.min(GMIN_DEFAULT, angDiam * 1.1));
+  }
+  const _fwd = [0, 0, 0], _gp = [0, 0, 0];
+  // 極小画角 (超高倍率) では f32 行列の量子化で照準・描画が破綻するため、
+  // 地上ビューの行列は f64 で合成し、GPU へ渡す直前に f32 化する
+  const gVP = mIdent(new Float64Array(16)), gVP32 = new Float32Array(16);
+  const gP64 = new Float64Array(16), gV64 = new Float64Array(16), gM64 = new Float64Array(16);
   let groundVB = null, groundPtVB = null, horizonVB = null, horizonN = 0;
   // 地上ビューに出す天体: 太陽・月・全惑星 (準惑星・小惑星・彗星含む)。
   // 他の衛星は低倍率では母惑星の点と重なるため除外
@@ -1865,9 +1881,10 @@
     }
     const ca = Math.cos(gAlt);
     _fwd[0] = ca*Math.sin(gAz); _fwd[1] = Math.sin(gAlt); _fwd[2] = -ca*Math.cos(gAz);
-    mLookAt(ZERO3, _fwd, UP3, Vm);
-    mPersp(gFov, W / H, 0.05, 2000, SCR.P);
-    mMul(SCR.P, Vm, gVP);
+    mLookAt(ZERO3, _fwd, UP3, gV64);
+    mPersp(gFov, W / H, 0.05, 2000, gP64);
+    mMul(gP64, gV64, gVP);
+    gVP32.set(gVP);
 
     gl.clearColor(0.015, 0.02, 0.045, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -1875,7 +1892,7 @@
 
     // 地面 (y=0 平面。カメラは原点なので下半分を覆う)
     gl.useProgram(lineP.pr);
-    gl.uniformMatrix4fv(lineP.u.uVP, false, gVP);
+    gl.uniformMatrix4fv(lineP.u.uVP, false, gVP32);
     gl.uniform4f(lineP.u.uColor, 0.07, 0.075, 0.085, 1);
     gl.bindBuffer(gl.ARRAY_BUFFER, groundVB);
     gl.enableVertexAttribArray(lineP.a.aPos);
@@ -1913,7 +1930,7 @@
       }
       if (ns) {
         gl.useProgram(pointP.pr);
-        gl.uniformMatrix4fv(pointP.u.uVP, false, gVP);
+        gl.uniformMatrix4fv(pointP.u.uVP, false, gVP32);
         gl.uniform1f(pointP.u.uScale, DPR);
         gl.uniform1f(pointP.u.uAlpha, 0.95);
         gl.bindBuffer(gl.ARRAY_BUFFER, starGVB);
@@ -1955,7 +1972,7 @@
     }
     if (n) {
       gl.useProgram(pointP.pr);
-      gl.uniformMatrix4fv(pointP.u.uVP, false, gVP);
+      gl.uniformMatrix4fv(pointP.u.uVP, false, gVP32);
       gl.uniform1f(pointP.u.uScale, DPR);
       gl.uniform1f(pointP.u.uAlpha, 1.0);
       gl.bindBuffer(gl.ARRAY_BUFFER, groundPtVB);
@@ -1990,7 +2007,7 @@
         let yx = -upd*nx, yy = 1 - upd*ny, yz = -upd*nz;
         const yl = Math.hypot(yx, yy, yz) || 1; yx/=yl; yy/=yl; yz/=yl;
         const zx = ny*yz - nz*yy, zy = nz*yx - nx*yz, zz = nx*yy - ny*yx;
-        const m = SCR.model;
+        const m = gM64;   // f64 のまま合成し、mMul の出力 (f32) だけを GPU へ
         m[0]=nx*R; m[1]=ny*R; m[2]=nz*R; m[3]=0;
         m[4]=yx*R; m[5]=yy*R; m[6]=yz*R; m[7]=0;
         m[8]=zx*R; m[9]=zy*R; m[10]=zz*R; m[11]=0;
@@ -1999,7 +2016,8 @@
         gl.bindTexture(gl.TEXTURE_2D, tx || noTex);
         gl.uniform1f(bodyP.u.uHasTex, tx ? 1 : 0);
         gl.uniformMatrix4fv(bodyP.u.uMVP, false, mMul(gVP, m, SCR.mvp));
-        gl.uniformMatrix4fv(bodyP.u.uModel, false, m);
+        SCR.model.set(m);   // uModel は f32 で十分 (法線用)。f64 配列を直接渡さない
+        gl.uniformMatrix4fv(bodyP.u.uModel, false, SCR.model);
         gl.uniform1f(bodyP.u.uType, b.type);
         gl.uniform3fv(bodyP.u.uColA, b.colA);
         gl.uniform3fv(bodyP.u.uColB, b.colB);
@@ -2040,6 +2058,7 @@
   // 通常は目標値だけ更新して緩和で滑らかに回す。instant=true で即時ジャンプ
   function aimGroundAt(body, instant) {
     if (!body || body.key === "earth") return false;
+    gTrack = true;
     const c = computeObs(body);
     // 現在の向きから最短方向で回るよう、目標方位は現在値の近傍に取る
     let d = (c.az * DEG - gAz) % (2 * Math.PI);
@@ -2601,6 +2620,37 @@
     cam.yaw += dyaw * k;
     cam.pitch += (cam.pitchTgt - cam.pitch) * k;
     // 地上ビューのカメラ緩和 (目標方位は aimGroundAt で現在値の近傍に正規化済み)
+    if (groundView) {
+      // 選択が変わって天体別の画角下限が上がった場合は目標を追従させる
+      const mf = gMinFov();
+      if (gFovTgt < mf) gFovTgt = mf;
+      // 自動追尾: 日周運動での移動分は即時反映し、残差のみ緩和で追従
+      // (緩和だけだと定常遅れが高倍率の視野幅を超え、天体が視野外に留まるため)
+      if (gTrack) {
+        const b = selected || lastCenter;
+        if (b && b.key !== "earth") {
+          const c = computeObs(b);
+          const az = c.az * DEG, alt = c.alt * DEG;
+          if (gTrkKey === b.key) {
+            // 前フレームからの移動分は即時追従
+            let dm = (az - gTrkAz) % (2 * Math.PI);
+            if (dm > Math.PI) dm -= 2 * Math.PI;
+            if (dm < -Math.PI) dm += 2 * Math.PI;
+            gAz += dm;
+            gAlt += alt - gTrkAlt;
+          }
+          // 残差 (追尾開始前に生じたずれ等) は目標へ寄せて緩和で収束させる
+          let dr = (az - gAz) % (2 * Math.PI);
+          if (dr > Math.PI) dr -= 2 * Math.PI;
+          if (dr < -Math.PI) dr += 2 * Math.PI;
+          gAzTgt = gAz + dr;
+          gAltTgt = Math.max(-1.4, Math.min(1.4, alt));
+          gTrkKey = b.key; gTrkAz = az; gTrkAlt = alt;
+        }
+      } else {
+        gTrkKey = "";
+      }
+    }
     gAz += (gAzTgt - gAz) * k;
     gAlt += (gAltTgt - gAlt) * k;
     gFov += (gFovTgt - gFov) * k;
@@ -3059,6 +3109,7 @@
     if (pointers.size === 1) {
       if (groundView) {
         const s = 0.004 * (gFov / (60 * DEG));   // 拡大時ほど細かく
+        gTrack = false;                          // 手動で見回したら追尾解除
         gAz += dx * s;
         gAlt = Math.max(-1.4, Math.min(1.4, gAlt - dy * s));
         gAzTgt = gAz;
@@ -3073,7 +3124,7 @@
       const [a, b] = [...pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       if (groundView) {
-        if (pinchDist > 0) gFovTgt = Math.max(MIN_FOV, Math.min(MAX_FOV, gFovTgt * pinchDist / d));
+        if (pinchDist > 0) gFovTgt = Math.max(gMinFov(), Math.min(MAX_FOV, gFovTgt * pinchDist / d));
       } else if (pinchDist > 0) {
         cam.distTgt = Math.max(minDist(), Math.min(1400, cam.distTgt * pinchDist / d));
       }
@@ -3103,7 +3154,7 @@
   glc.addEventListener("wheel", (e) => {
     e.preventDefault();
     if (groundView) {
-      gFovTgt = Math.max(MIN_FOV, Math.min(MAX_FOV, gFovTgt * Math.exp(e.deltaY * 0.0012)));
+      gFovTgt = Math.max(gMinFov(), Math.min(MAX_FOV, gFovTgt * Math.exp(e.deltaY * 0.0012)));
     } else {
       cam.distTgt = Math.max(minDist(), Math.min(1400, cam.distTgt * Math.exp(e.deltaY * 0.0016)));
     }
@@ -3270,22 +3321,24 @@
   const gAltVal = document.getElementById("gAltVal");
   let gFovActive = false, gAltActive = false;
   let lastGFov = "", lastGAz = "", lastGAlt = "";
-  const FOV_RATIO = Math.log(MIN_FOV / MAX_FOV);
-  // スライダーは直接操作なので即時 (目標値も同期)。ボタン/ホイールは目標値へ寄せて滑らかに
-  gFovInput.addEventListener("input", () => { gFov = gFovTgt = MAX_FOV * Math.exp(FOV_RATIO * gFovInput.value / 100); });
+  // スライダーは直接操作なので即時 (目標値も同期)。ボタン/ホイールは目標値へ寄せて滑らかに。
+  // マッピングは MAX_FOV 〜 天体別の動的下限 gMinFov() の指数スケール
+  gFovInput.addEventListener("input", () => {
+    gFov = gFovTgt = MAX_FOV * Math.exp(Math.log(gMinFov() / MAX_FOV) * gFovInput.value / 100);
+  });
   gFovInput.addEventListener("pointerdown", () => { gFovActive = true; });
-  gAltInput.addEventListener("input", () => { gAlt = gAltTgt = gAltInput.value * DEG; });
+  gAltInput.addEventListener("input", () => { gTrack = false; gAlt = gAltTgt = gAltInput.value * DEG; });
   gAltInput.addEventListener("pointerdown", () => { gAltActive = true; });
   window.addEventListener("pointerup", () => { gFovActive = false; gAltActive = false; });
-  const stepFov = (dir) => { gFovTgt = Math.max(MIN_FOV, Math.min(MAX_FOV, gFovTgt * (dir > 0 ? 1.3 : 1 / 1.3))); };
+  const stepFov = (dir) => { gFovTgt = Math.max(gMinFov(), Math.min(MAX_FOV, gFovTgt * (dir > 0 ? 1.3 : 1 / 1.3))); };
   bindHold(document.getElementById("gFovOut"), () => stepFov(1));    // − = 広げる
   bindHold(document.getElementById("gFovIn"), () => stepFov(-1));    // ＋ = 狭める (ズームイン)
-  bindHold(document.getElementById("gAzLeft"), () => { gAzTgt -= gFov * 0.4; });
-  bindHold(document.getElementById("gAzRight"), () => { gAzTgt += gFov * 0.4; });
+  bindHold(document.getElementById("gAzLeft"), () => { gTrack = false; gAzTgt -= gFov * 0.4; });
+  bindHold(document.getElementById("gAzRight"), () => { gTrack = false; gAzTgt += gFov * 0.4; });
   function updateGroundUI() {
     if (!groundView) return;
     if (!gFovActive) {
-      const v = String(Math.round(100 * Math.log(gFov / MAX_FOV) / FOV_RATIO));
+      const v = String(Math.round(100 * Math.log(gFov / MAX_FOV) / Math.log(gMinFov() / MAX_FOV)));
       if (gFovInput.value !== v) gFovInput.value = v;
     }
     const z = 1 / Math.tan(gFov / 2);
