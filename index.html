@@ -1,5 +1,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#04060e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Galaxeum">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
 <title>Galaxeum</title>
 <style>
   :root {
@@ -709,6 +717,7 @@
   <div id="menu" class="hud" role="menu">
     <button id="menuLang" role="menuitem"></button>
     <button id="menuUnit" role="menuitem"></button>
+    <button id="menuFullscreen" role="menuitem"></button>
     <button id="menuShare" role="menuitem"></button>
     <button id="menuAbout" role="menuitem"></button>
   </div>
@@ -995,6 +1004,8 @@
       menuUnitToKm: "距離を km 表示",
       menuShare: "共有リンクをコピー",
       menuShareDone: "コピーしました",
+      menuFs: "全画面表示",
+      menuFsExit: "全画面を終了",
       menuNavHide: "天体リストを隠す",
       menuNavShow: "天体リストを表示",
       obs: {
@@ -1029,6 +1040,8 @@
       menuUnitToKm: "Distances in km",
       menuShare: "Copy shareable link",
       menuShareDone: "Copied!",
+      menuFs: "Fullscreen",
+      menuFsExit: "Exit fullscreen",
       menuNavHide: "Hide body list",
       menuNavShow: "Show body list",
       obs: {
@@ -3706,6 +3719,27 @@
     setMenu(false);
   });
 
+  // 全画面表示 (Fullscreen API)。iPhone の Safari は非対応のためボタン自体を隠す
+  const menuFsBtn = document.getElementById("menuFullscreen");
+  const docEl = document.documentElement;
+  const fsSupported = !!(docEl.requestFullscreen || docEl.webkitRequestFullscreen);
+  if (!fsSupported) menuFsBtn.style.display = "none";
+  const isFs = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  function updateFsLabel() {
+    menuFsBtn.textContent = isFs() ? T().menuFsExit : T().menuFs;
+  }
+  menuFsBtn.addEventListener("click", () => {
+    if (isFs()) {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    } else {
+      const p = (docEl.requestFullscreen || docEl.webkitRequestFullscreen).call(docEl);
+      if (p && p.catch) p.catch(() => {});   // ジェスチャ判定などで拒否されても静かに無視
+    }
+    setMenu(false);
+  });
+  document.addEventListener("fullscreenchange", updateFsLabel);
+  document.addEventListener("webkitfullscreenchange", updateFsLabel);
+
   // 天体リストの表示/非表示 (« で左へ引っ込み、左端の » で出てくる。モバイルは初期非表示)
   let navVisible = !window.matchMedia("(max-width: 720px)").matches;
   const navCollapseBtn = document.getElementById("navCollapse");
@@ -3873,6 +3907,7 @@
     document.getElementById("nowBtn").textContent = t.nowBtn;
     menuLangBtn.textContent = t.menuLang;
     menuShareBtn.textContent = t.menuShare;
+    updateFsLabel();
     menuAboutBtn.textContent = t.menuAbout;
     updateUnitLabel();
     applyNavVisible();
