@@ -1825,7 +1825,7 @@
   let groundView = false;
   let gAz = 0, gAlt = 0.45, gFov = 60 * DEG;            // 視線方位・高度 (rad)・画角
   let gAzTgt = 0, gAltTgt = 0.45, gFovTgt = 60 * DEG;   // 目標値 (宇宙ビュー同様に緩和で追従)
-  const MIN_FOV = 0.25 * DEG, MAX_FOV = 90 * DEG;   // 望遠鏡並みの拡大まで許可
+  const MIN_FOV = 0.003 * DEG, MAX_FOV = 90 * DEG;  // 画角下限 ≈11秒角 (×約38,000)。遠い惑星も円盤に見える
   const _fwd = [0, 0, 0], _gp = [0, 0, 0], gVP = mIdent();
   let groundVB = null, groundPtVB = null, horizonVB = null, horizonN = 0;
   // 地上ビューに出す天体: 太陽・月・全惑星 (準惑星・小惑星・彗星含む)。
@@ -3289,7 +3289,7 @@
       if (gFovInput.value !== v) gFovInput.value = v;
     }
     const z = 1 / Math.tan(gFov / 2);
-    const fv = "×" + (z < 10 ? z.toFixed(1) : Math.round(z));
+    const fv = "×" + (z < 10 ? z.toFixed(1) : Math.round(z).toLocaleString("en-US"));
     if (fv !== lastGFov) { gFovVal.textContent = fv; lastGFov = fv; }
     const azn = ((gAz / DEG) % 360 + 360) % 360;
     const as = Math.round(azn) + "°";
