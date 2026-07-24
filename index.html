@@ -1991,6 +1991,10 @@
       const sc = computeObs(SUN);
       azAltDir(sc.az, sc.alt, _fwd);
       gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.clear(gl.DEPTH_BUFFER_BIT);
+      // 距離100に対して半径が極小のため深度精度が足りず、裏側の半球が
+      // Zファイティングで突き抜ける。裏面カリングで自己交差を防ぐ
+      gl.enable(gl.CULL_FACE);
+      gl.cullFace(gl.BACK);
       gl.useProgram(bodyP.pr);
       gl.bindBuffer(gl.ARRAY_BUFFER, sphereVB);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereIB);
@@ -2026,6 +2030,7 @@
         gl.uniform4fv(bodyP.u.uParams, b.params);
         gl.drawElements(gl.TRIANGLES, sphere.idx.length, gl.UNSIGNED_SHORT, 0);
       }
+      gl.disable(gl.CULL_FACE);
       gl.disable(gl.DEPTH_TEST);
     }
     gl.depthMask(true);
